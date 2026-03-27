@@ -87,7 +87,13 @@ jobs:
           mkdir -p release_assets
           for dir in artifacts/*; do
             if [ -d "$dir" ]; then
-              cp "$dir"/* release_assets/
+              asset_name=$(basename "$dir")
+              # The file inside the artifact dir is either buaa-checkin or buaa-checkin.exe
+              if [ -f "$dir/buaa-checkin.exe" ]; then
+                cp "$dir/buaa-checkin.exe" "release_assets/$asset_name"
+              elif [ -f "$dir/buaa-checkin" ]; then
+                cp "$dir/buaa-checkin" "release_assets/$asset_name"
+              fi
             fi
           done
 
