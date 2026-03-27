@@ -61,11 +61,21 @@ pub async fn plan_tasks(
         }
 
         let run_at = if now < checkin_window_start {
-            // Future class: pick a random time in the 10-minute window
+            // Future class: pick a random time in the 10-minute window [start-10m, start]
             randomized_run_at(class_start)
+        } else if now < class_start {
+            // We are already inside the 10-min window before class starts.
+            // Pick a random time between now and class_start, with at least some jitter.
+            let remaining = class_start.saturating_sub(now);
+            let offset = if remaining > 30 {
+                rand::rng().random_range(1..=remaining)
+            } else {
+                rand::rng().random_range(1..=30)
+            };
+            now + offset
         } else {
-            // Ongoing class (we woke up late or just started): run within 0-30 seconds
-            let offset: u64 = rand::rng().random_range(1..=30);
+            // Ongoing class (we woke up late or just started): run within 30-120 seconds
+            let offset: u64 = rand::rng().random_range(30..=120);
             now + offset
         };
 

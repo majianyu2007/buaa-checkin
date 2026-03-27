@@ -379,10 +379,10 @@ async function loadSettings() {
       <div class="card" style="border-color:rgba(231, 76, 60, 0.3)">
         <div class="card-title" style="color:var(--accent-red)"><span class="icon">⚠️</span> 电源管理</div>
         <p style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:1rem">
-          如果是使用 Docker 或 Systemd 管理的服务，关闭系统后通常会自动重启。
+          如果是使用 Docker 或 Systemd 管理的服务，关闭程序后通常会自动重启（相当于重启服务）。
         </p>
         <div style="display:flex;gap:10px">
-          <button class="btn btn-danger" onclick="shutdownSystem()">关闭系统</button>
+          <button class="btn btn-danger" onclick="shutdownSystem()">关闭程序</button>
         </div>
       </div>
     `;
@@ -403,7 +403,7 @@ async function updateSettings() {
 }
 
 async function shutdownSystem() {
-  if (!confirm('确定要关闭系统吗？\n警告：关闭后您需要手动在服务器上重新启动，除非配置了自动重启。')) return;
+  if (!confirm('确定要关闭 BUAA-Checkin 程序吗？\n注意：这不会关闭您的服务器，仅会退出当前运行的签到进程。')) return;
   try {
     const data = await api('POST', '/api/system/shutdown');
     toast(data.message);
