@@ -21,3 +21,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 jsonwebtoken = "9"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 tower = "0.5"
+rust-embed = "8"
+mime_guess = "2"

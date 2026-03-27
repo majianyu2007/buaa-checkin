@@ -5,10 +5,16 @@ mod pipeline;
 mod store;
 mod webhook;
 
+use axum::http::{header, StatusCode};
+use axum::response::IntoResponse;
+use rust_embed::RustEmbed;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::services::ServeDir;
 use tracing::info;
+
+#[derive(RustEmbed)]
+#[folder = "static/"]
+struct Assets;
 
 pub struct AppState {
     pub client: Arc<client::ClassClient>,
@@ -92,11 +98,33 @@ async fn main() {
     // Build Axum app
     let app = api::routes()
         .layer(cors)
-        .fallback_service(ServeDir::new("static").append_index_html_on_directories(true))
+        .fallback(static_handler)
         .with_state(state);
 
     let addr = format!("0.0.0.0:{port}");
     info!(addr = %addr, "HTTP server starting");
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn static_handler(uri: axum::http::Uri) -> impl IntoResponse {
+    let mut path = uri.path().trim_start_matches('/').to_string();
+    if path.is_empty() {
+        path = "index.html".to_string();
+    }
+
+    match Assets::get(&path) {
+        Some(content) => {
+            let mime = mime_guess::from_path(&path).first_or_octet_stream();
+            ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
+        }
+        None => {
+            // SPA fallback to index.html for any unknown path
+            if let Some(content) = Assets::get("index.html") {
+                ([(header::CONTENT_TYPE, "text/html")], content.data).into_response()
+            } else {
+                (StatusCode::NOT_FOUND, "Not Found").into_response()
+            }
+        }
+    }
 }
