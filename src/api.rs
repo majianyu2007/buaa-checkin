@@ -83,6 +83,7 @@ struct LoginResponse {
 #[derive(Deserialize)]
 pub struct ScheduleQuery {
     date: Option<String>,
+    force: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -296,6 +297,11 @@ async fn schedules_handler(
 ) -> Result<Json<Vec<crate::client::Schedule>>, AppError> {
     let student_id = extract_student_id(&headers, &state.jwt_secret)?;
     let date = q.date.unwrap_or_else(poller::today_str);
+    
+    if q.force.unwrap_or(false) {
+        state.client.invalidate_schedule_cache(&student_id, &date);
+    }
+    
     let schedules = state.client.query_schedule(&student_id, &date).await?;
     Ok(Json(schedules))
 }

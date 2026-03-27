@@ -186,14 +186,14 @@ function switchTab(tab) {
 
 // ── Schedules tab ────────────────────────────────────────────────────────────
 
-async function loadSchedules(dateStr) {
+async function loadSchedules(dateStr, force = false) {
   const content = document.getElementById('tab-content');
   const date = dateStr || new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const displayDate = date.slice(0, 4) + '-' + date.slice(4, 6) + '-' + date.slice(6, 8);
 
   try {
     const [schedules, enabledCourses] = await Promise.all([
-      api('GET', `/api/schedules?date=${date}`),
+      api('GET', `/api/schedules?date=${date}${force ? '&force=true' : ''}`),
       api('GET', '/api/me/courses').catch(() => [])
     ]);
 
@@ -201,8 +201,11 @@ async function loadSchedules(dateStr) {
       <div class="card">
         <div class="card-title" style="justify-content:space-between">
           <span><span class="icon">📋</span> 课表查询</span>
-          <input type="date" value="${displayDate}" onchange="loadSchedules(this.value.replace(/-/g, ''))" 
-            style="padding:4px 8px; border:1px solid #ddd; border-radius:4px; font-size:14px; background:var(--bg-secondary); color:var(--text-primary)">
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-secondary btn-sm" onclick="loadSchedules('${date}', true)" title="强制刷新">🔄 刷新</button>
+            <input type="date" value="${displayDate}" onchange="loadSchedules(this.value.replace(/-/g, ''))" 
+              style="padding:4px 8px; border:1px solid #ddd; border-radius:4px; font-size:14px; background:var(--bg-secondary); color:var(--text-primary)">
+          </div>
         </div>
     `;
 
