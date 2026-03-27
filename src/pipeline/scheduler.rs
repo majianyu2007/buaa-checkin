@@ -47,16 +47,35 @@ pub async fn plan_tasks(
         let Some(class_start) = parse_class_time(&sched.time) else {
             continue;
         };
-        let run_at = randomized_run_at(class_start);
-        if run_at < now {
+        let class_end = sched
+            .end_time
+            .as_deref()
+            .and_then(parse_class_time)
+            .unwrap_or(class_start + 5400); // default to 90 mins if missing
+
+        let checkin_window_start = class_start.saturating_sub(600); // 10 mins before
+
+        if now > class_end {
+            // Class already ended
             continue;
         }
+
+        let run_at = if now < checkin_window_start {
+            // Future class: pick a random time in the 10-minute window
+            randomized_run_at(class_start)
+        } else {
+            // Ongoing class (we woke up late or just started): run within 0-30 seconds
+            let offset: u64 = rand::rng().random_range(1..=30);
+            now + offset
+        };
+
         debug!(
             student = student_id,
             sched_id = %sched.id,
             course_id = %sched.course_id,
             run_at,
             class_start,
+            class_end,
             "scheduling task"
         );
         queue

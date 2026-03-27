@@ -356,7 +356,10 @@ async function loadWebhook() {
           <label>自定义 URL（可选，覆盖 Key）</label>
           <input type="text" id="wh-url" value="${escAttr(config.url || '')}" placeholder="https://your-webhook-endpoint.com">
         </div>
-        <button class="btn btn-primary" onclick="saveWebhook()">保存设置</button>
+        <div class="form-group" style="display:flex;gap:10px">
+          <button class="btn btn-primary" onclick="saveWebhook()" style="flex:1">保存设置</button>
+          <button class="btn btn-secondary" onclick="testWebhook()" style="flex:1">测试通知</button>
+        </div>
       </div>
     `;
     document.getElementById('wh-provider').addEventListener('change', (e) => {
@@ -379,6 +382,15 @@ async function saveWebhook() {
   };
   try {
     const data = await api('POST', '/api/webhook', config);
+    toast(data.message);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function testWebhook() {
+  try {
+    const data = await api('POST', '/api/webhook/test');
     toast(data.message);
   } catch (err) {
     toast(err.message, 'error');

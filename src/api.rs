@@ -134,6 +134,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/poll", post(poll_handler))
         .route("/api/webhook", get(get_webhook_handler))
         .route("/api/webhook", post(set_webhook_handler))
+        .route("/api/webhook/test", post(test_webhook_handler))
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -314,5 +315,37 @@ async fn set_webhook_handler(
     info!("webhook config updated via API");
     Ok(Json(MessageResponse {
         message: "Webhook 配置已更新".to_string(),
+    }))
+}
+
+async fn test_webhook_handler(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<MessageResponse>, AppError> {
+    let student_id = extract_student_id(&headers, &state.jwt_secret)?;
+    let student_name = state
+        .store
+        .get_student(&student_id)
+        .map(|s| s.name.clone())
+        .unwrap_or_else(|| student_id.clone());
+
+    let config = state.store.webhook();
+    if !config.enabled {
+        return Err(AppError::bad_request("Webhook 通知未启用，请先配置并启用"));
+    }
+
+    let event = crate::webhook::CheckinEvent {
+        student_id,
+        student_name,
+        course_name: "测试通知课程".to_string(),
+        course_id: "TEST-1234".to_string(),
+        schedule_id: "SCHED-TEST-0000".to_string(),
+        is_retry: false,
+    };
+
+    crate::webhook::notify(&state.webhook_http, &config, &event).await;
+
+    Ok(Json(MessageResponse {
+        message: "测试通知已触发".to_string(),
     }))
 }
