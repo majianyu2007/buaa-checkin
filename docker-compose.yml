@@ -1,0 +1,11 @@
+services:
+  buaa-checkin:
+    build: .
+    ports:
+      - "80:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - JWT_SECRET=changeme
+      - RUST_LOG=buaa_checkin=info
+    restart: unless-stopped
