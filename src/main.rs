@@ -33,9 +33,9 @@ pub struct AppState {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    /// Port to listen on
-    #[arg(short, long, default_value_t = 3000, env = "PORT")]
-    port: u16,
+    /// Port to listen on (overrides config if specified and saves it)
+    #[arg(short, long, env = "PORT")]
+    port: Option<u16>,
 
     /// Directory to store configuration data
     #[arg(short, long, default_value = "./data", env = "DATA_DIR")]
@@ -87,13 +87,20 @@ fn main() {
     });
 }
 
-pub async fn run_server(data_dir: String, port: u16) {
+pub async fn run_server(data_dir: String, cli_port: Option<u16>) {
     let config_path = format!("{}/config.json", data_dir);
     let jwt_secret =
         std::env::var("JWT_SECRET").unwrap_or_else(|_| "buaa-checkin-default-secret".to_string());
 
     // Load store
     let store = Arc::new(store::Store::load(&config_path));
+    if let Some(p) = cli_port {
+        if let Err(e) = store.set_port(p) {
+            tracing::error!("failed to save overriding port to store: {}", e);
+        }
+    }
+    let port = store.port();
+
     let config = store.config();
 
     info!(

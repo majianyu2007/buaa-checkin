@@ -8,6 +8,10 @@ use crate::webhook::WebhookConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreConfig {
+    #[serde(default = "default_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub admin_id: String,
     #[serde(default = "default_poll")]
     pub poll_interval_minutes: u64,
     #[serde(default = "default_window")]
@@ -26,6 +30,10 @@ pub struct StudentEntry {
     pub course_ids: Vec<String>,
 }
 
+fn default_port() -> u16 {
+    3000
+}
+
 fn default_poll() -> u64 {
     10
 }
@@ -37,6 +45,8 @@ fn default_window() -> u64 {
 impl Default for StoreConfig {
     fn default() -> Self {
         Self {
+            port: default_port(),
+            admin_id: String::new(),
             poll_interval_minutes: default_poll(),
             auto_window_minutes: default_window(),
             students: Vec::new(),
@@ -90,6 +100,38 @@ impl Store {
 
     pub fn config(&self) -> StoreConfig {
         self.inner.read().unwrap().clone()
+    }
+
+    pub fn port(&self) -> u16 {
+        self.inner.read().unwrap().port
+    }
+
+    pub fn set_port(&self, port: u16) -> AppResult<()> {
+        self.inner.write().unwrap().port = port;
+        self.save()
+    }
+
+    pub fn admin_id(&self) -> String {
+        self.inner.read().unwrap().admin_id.clone()
+    }
+
+    pub fn set_admin_id(&self, admin_id: String) -> AppResult<()> {
+        self.inner.write().unwrap().admin_id = admin_id;
+        self.save()
+    }
+
+    pub fn is_admin(&self, student_id: &str) -> bool {
+        let config = self.inner.read().unwrap();
+        if config.admin_id == student_id {
+            return true;
+        }
+        if config.admin_id.is_empty() {
+            if let Some(first) = config.students.first() {
+                return first.student_id == student_id;
+            }
+            return true; // No users yet, the first to login gets admin-like access
+        }
+        false
     }
 
     pub fn poll_interval_minutes(&self) -> u64 {

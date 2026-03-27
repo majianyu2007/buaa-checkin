@@ -99,26 +99,55 @@ async function handleLogin(e) {
   }
 }
 
-function showDashboard() {
+async function showDashboard() {
   const app = document.getElementById('app');
+  app.innerHTML = '<div class="empty"><span class="spinner"></span> 载入系统信息...</div>';
+
+  let isAdmin = false;
+  let version = "0.0.0";
+  try {
+    const sys = await api('GET', '/api/system/info');
+    isAdmin = sys.is_admin;
+    version = sys.version;
+
+    // Async update check
+    fetch('https://api.github.com/repos/majianyu2007/buaa-checkin/releases/latest')
+      .then(res => res.json())
+      .then(rel => {
+        if (rel.tag_name && rel.tag_name > 'v' + version) {
+          const badge = document.getElementById('update-badge');
+          if (badge) {
+            badge.innerHTML = `<a href="${rel.html_url}" target="_blank" style="color:#e74c3c;font-size:0.8rem;text-decoration:none;background:#fdebd0;padding:2px 6px;border-radius:4px;margin-left:8px;">✨ 有新版本 ${rel.tag_name}</a>`;
+          }
+        }
+      }).catch(() => {});
+  } catch (err) {
+    if (err.message.includes("过期") || err.message.includes("Token")) {
+      return logout();
+    }
+    toast("无法获取系统信息: " + err.message, "error");
+  }
+
   const initial = currentUser.name ? currentUser.name[0] : '?';
   app.innerHTML = `
-    <div class="header">
+    <div class="header" style="position:relative">
       <h1>BUAA 智慧教室</h1>
-      <p>自动签到管理系统</p>
+      <p>自动签到管理系统 <span id="update-badge" style="display:inline-block">v${version}</span></p>
     </div>
     <div class="navbar">
       <div class="navbar-user">
         <div class="avatar">${initial}</div>
-        <span>${currentUser.name} (${currentUser.student_id})</span>
+        <span>${currentUser.name} (${currentUser.student_id}) ${isAdmin ? '<small style="color:#f39c12">[管理员]</small>' : ''}</span>
       </div>
       <button class="btn btn-secondary btn-sm" onclick="logout()">退出登录</button>
     </div>
     <div class="tabs">
       <button class="tab active" data-tab="schedules" onclick="switchTab('schedules')">📋 今日课表</button>
+      ${isAdmin ? `
       <button class="tab" data-tab="users" onclick="switchTab('users')">👥 用户管理</button>
       <button class="tab" data-tab="tasks" onclick="switchTab('tasks')">⏱ 自动任务</button>
       <button class="tab" data-tab="webhook" onclick="switchTab('webhook')">🔔 通知设置</button>
+      ` : ''}
     </div>
     <div id="tab-content"></div>
   `;
@@ -156,7 +185,11 @@ function switchTab(tab) {
 async function loadSchedules() {
   const content = document.getElementById('tab-content');
   try {
-    const schedules = await api('GET', '/api/schedules');
+    const [schedules, enabledCourses] = await Promise.all([
+      api('GET', '/api/schedules'),
+      api('GET', '/api/me/courses').catch(() => [])
+    ]);
+
     if (schedules.length === 0) {
       content.innerHTML = `
         <div class="card">
@@ -183,7 +216,9 @@ async function loadSchedules() {
             </tr>
           </thead>
           <tbody>
-            ${schedules.map(s => `
+            ${schedules.map(s => {
+              const isAuto = enabledCourses.includes(s.course_id);
+              return `
               <tr>
                 <td>${escHtml(s.courseName || s.name)}</td>
                 <td>${escHtml(s.teacherName || s.teacher)}</td>
@@ -195,9 +230,14 @@ async function loadSchedules() {
                   ${s.signStatus !== '1' && s.status_raw !== '1'
                     ? `<button class="btn btn-primary btn-sm" onclick="doCheckin('${escAttr(s.id)}')">签到</button>`
                     : ''}
+                  <button class="btn btn-sm" onclick="toggleAutoCheckin('${escAttr(s.course_id)}', ${isAuto})"
+                    style="margin-left:4px; padding:4px 8px; background: ${isAuto ? '#e8f8f5' : '#f8f9f9'}; color: ${isAuto ? '#27ae60' : '#7f8c8d'}; border: 1px solid ${isAuto ? '#a3e4d7' : '#d5d8dc'}; cursor:pointer; border-radius:4px; transition:0.2s">
+                    ${isAuto ? '✅ 自动签到 (已开启)' : '⭕️ 开启自动签到'}
+                  </button>
                 </td>
               </tr>
-            `).join('')}
+              `;
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -211,12 +251,23 @@ async function doCheckin(scheduleId) {
   try {
     const data = await api('POST', '/api/checkin', { schedule_id: scheduleId });
     toast(data.message);
-    loadSchedules();
+    setTimeout(() => loadSchedules(), 1500);
   } catch (err) {
     toast(err.message, 'error');
   }
 }
 
+async function toggleAutoCheckin(courseId, isCurrentlyEnabled) {
+  try {
+    const method = isCurrentlyEnabled ? 'DELETE' : 'POST';
+    const data = await api(method, `/api/me/courses/${courseId}`);
+    toast(data.message);
+    // Reload schedules to update badges
+    setTimeout(() => loadSchedules(), 300);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
 // ── Users tab ────────────────────────────────────────────────────────────────
 
 async function loadUsers() {
@@ -225,30 +276,21 @@ async function loadUsers() {
     const users = await api('GET', '/api/users');
     content.innerHTML = `
       <div class="card">
-        <div class="card-title"><span class="icon">➕</span> 添加用户到自动签到</div>
-        <div class="inline-form" id="add-user-form">
-          <div class="form-group">
-            <label>学号</label>
-            <input type="text" id="new-student-id" placeholder="学号">
-          </div>
-          <div class="form-group">
-            <label>课程 ID（逗号分隔）</label>
-            <input type="text" id="new-course-ids" placeholder="course1,course2">
-          </div>
-          <button class="btn btn-primary btn-sm" onclick="addUser()" style="margin-bottom:0">添加</button>
+        <div class="card-title" style="margin-bottom:1rem">
+          <span class="icon">👥</span> 已注册系统用户 (${users.length})
         </div>
-      </div>
-      <div class="card">
-        <div class="card-title"><span class="icon">👥</span> 已注册用户 (${users.length})</div>
+        <p style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:1rem">
+          用户可通过“今日课表”自行开启自动签到功能，开启后将显示在此列表中。你可以移除不需要自动代签的用户。
+        </p>
         ${users.length === 0 ? '<div class="empty"><div class="icon">👤</div><p>暂无注册用户</p></div>' :
           users.map(u => `
             <div class="user-item">
               <div class="user-info">
                 <span class="user-name">${escHtml(u.name)}</span>
                 <span class="user-id">${escHtml(u.student_id)}</span>
-                <span class="user-courses">课程: ${u.course_ids.length ? u.course_ids.map(escHtml).join(', ') : '无'}</span>
+                <span class="user-courses">正在自动打卡课程数: ${u.course_ids.length}</span>
               </div>
-              <button class="btn btn-danger btn-sm" onclick="removeUser('${escAttr(u.student_id)}')">删除</button>
+              <button class="btn btn-danger btn-sm" onclick="removeUser('${escAttr(u.student_id)}')">移除</button>
             </div>
           `).join('')
         }
@@ -256,20 +298,6 @@ async function loadUsers() {
     `;
   } catch (err) {
     content.innerHTML = `<div class="card"><div class="empty">加载失败: ${escHtml(err.message)}</div></div>`;
-  }
-}
-
-async function addUser() {
-  const studentId = document.getElementById('new-student-id').value.trim();
-  const courseIdsRaw = document.getElementById('new-course-ids').value.trim();
-  if (!studentId) { toast('请输入学号', 'error'); return; }
-  const courseIds = courseIdsRaw ? courseIdsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
-  try {
-    const data = await api('POST', '/api/users', { student_id: studentId, course_ids: courseIds });
-    toast(data.message);
-    loadUsers();
-  } catch (err) {
-    toast(err.message, 'error');
   }
 }
 
