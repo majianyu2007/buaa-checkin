@@ -138,6 +138,24 @@ impl Store {
         self.inner.read().unwrap().poll_interval_minutes
     }
 
+    pub fn add_courses(&self, student_id: &str, course_ids: Vec<String>) -> AppResult<()> {
+        let mut config = self.inner.write().unwrap();
+        if let Some(s) = config.students.iter_mut().find(|s| s.student_id == student_id) {
+            for id in course_ids {
+                if !s.course_ids.contains(&id) {
+                    s.course_ids.push(id);
+                }
+            }
+        } else {
+            config.students.push(StudentEntry {
+                student_id: student_id.to_string(),
+                name: "未知用户".to_string(),
+                course_ids,
+            });
+        }
+        Ok(())
+    }
+
     pub fn students(&self) -> Vec<StudentEntry> {
         self.inner.read().unwrap().students.clone()
     }

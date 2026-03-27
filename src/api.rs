@@ -114,7 +114,7 @@ struct TaskResponse {
 }
 
 #[derive(Serialize)]
-struct MessageResponse {
+struct ApiResult {
     message: String,
 }
 
@@ -124,6 +124,7 @@ pub fn routes() -> Router<Arc<AppState>> {
     let me_routes = Router::new()
         .route("/courses", get(my_courses_handler))
         .route("/courses/all", get(all_courses_handler))
+        .route("/courses/all", post(add_all_courses_handler))
         .route("/courses/{course_id}", post(add_my_course_handler))
         .route("/courses/{course_id}", delete(remove_my_course_handler));
 
@@ -143,6 +144,9 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/webhook", get(get_webhook_handler))
         .route("/api/webhook", post(set_webhook_handler))
         .route("/api/webhook/test", post(test_webhook_handler))
+        .route("/api/system/settings", get(get_settings_handler))
+        .route("/api/system/settings", post(update_settings_handler))
+        .route("/api/system/shutdown", post(shutdown_handler))
         .nest("/api/me", me_routes)
 }
 
@@ -224,7 +228,7 @@ async fn add_my_course_handler(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
     Path(course_id): Path<String>,
-) -> Result<Json<MessageResponse>, AppError> {
+) -> Result<Json<ApiResult>, AppError> {
     let student_id = extract_student_id(&headers, &state.jwt_secret)?;
     // The student must exist in the store since they logged in successfully
     let mut entry = state.store.get_student(&student_id).unwrap_or_else(|| StudentEntry {
@@ -238,23 +242,49 @@ async fn add_my_course_handler(
         state.store.add_student(entry.clone())?;
         state.cache.set(student_id.clone(), entry.course_ids.clone());
     }
+    state.store.save()?;
 
-    Ok(Json(MessageResponse { message: "已开启自动签到".to_string() }))
+    Ok(Json(ApiResult {
+        message: format!("已开启课程 {} 的自动签到", course_id),
+    }))
+}
+
+async fn add_all_courses_handler(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<ApiResult>, AppError> {
+    let student_id = extract_student_id(&headers, &state.jwt_secret)?;
+    let term = current_term_id();
+    let all_courses = state.client.query_all_courses(&student_id, &term).await?;
+    
+    let course_ids: Vec<String> = all_courses.into_iter().map(|c| c.id).collect();
+    if course_ids.is_empty() {
+        return Err(AppError::not_found("本学期未找到任何课程"));
+    }
+
+    state.store.add_courses(&student_id, course_ids.clone())?;
+    state.cache.set(student_id, course_ids);
+    state.store.save()?;
+
+    Ok(Json(ApiResult {
+        message: "已为本学期所有课程开启自动签到".to_string(),
+    }))
 }
 
 async fn remove_my_course_handler(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
     Path(course_id): Path<String>,
-) -> Result<Json<MessageResponse>, AppError> {
+) -> Result<Json<ApiResult>, AppError> {
     let student_id = extract_student_id(&headers, &state.jwt_secret)?;
     if let Some(mut entry) = state.store.get_student(&student_id) {
         entry.course_ids.retain(|id| id != &course_id);
         state.store.add_student(entry.clone())?;
         state.cache.set(student_id.clone(), entry.course_ids.clone());
     }
+    state.store.save()?;
 
-    Ok(Json(MessageResponse { message: "已关闭自动签到".to_string() }))
+    Ok(Json(ApiResult { message: "已关闭自动签到".to_string() }))
 }
 
 // ── Action Handlers ───────────────────────────────────────────────────────────
@@ -284,23 +314,27 @@ async fn checkin_handler(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
     Json(req): Json<CheckinRequest>,
-) -> Result<Json<MessageResponse>, AppError> {
+) -> Result<Json<ApiResult>, AppError> {
     let student_id = extract_student_id(&headers, &state.jwt_secret)?;
     state.client.checkin(&student_id, &req.schedule_id).await?;
     // Invalidate schedule cache so dashboard refreshes show new status
     let today = poller::today_str();
     state.client.invalidate_schedule_cache(&student_id, &today);
     info!(student = %student_id, sched = %req.schedule_id, "manual checkin via API");
-    Ok(Json(MessageResponse {
+    Ok(Json(ApiResult {
         message: "签到成功".to_string(),
     }))
 }
 
 // ── Admin Handlers ────────────────────────────────────────────────────────────
 
-fn ensure_admin(headers: &axum::http::HeaderMap, state: &AppState) -> AppResult<String> {
-    let student_id = extract_student_id(headers, &state.jwt_secret)?;
-    if !state.store.is_admin(&student_id) {
+fn ensure_admin(
+    headers: &axum::http::HeaderMap,
+    store: &crate::store::Store,
+    jwt_secret: &str,
+) -> AppResult<String> {
+    let student_id = extract_student_id(headers, jwt_secret)?;
+    if !store.is_admin(&student_id) {
         return Err(AppError::unauthorized("需要管理员权限"));
     }
     Ok(student_id)
@@ -310,7 +344,7 @@ async fn list_users_handler(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
 ) -> Result<Json<Vec<UserResponse>>, AppError> {
-    let _admin = ensure_admin(&headers, &state)?;
+    let _admin = ensure_admin(&headers, &state.store, &state.jwt_secret)?;
     let users = state.store.students().into_iter().map(|s| UserResponse {
         student_id: s.student_id,
         name: s.name,
@@ -323,13 +357,13 @@ async fn remove_user_handler(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
     Path(student_id): Path<String>,
-) -> Result<Json<MessageResponse>, AppError> {
-    let _admin = ensure_admin(&headers, &state)?;
+) -> Result<Json<ApiResult>, AppError> {
+    let _admin = ensure_admin(&headers, &state.store, &state.jwt_secret)?;
     let removed = state.store.remove_student(&student_id)?;
     if removed {
         state.cache.remove(&student_id);
         info!(student = %student_id, "user removed by admin");
-        Ok(Json(MessageResponse {
+        Ok(Json(ApiResult {
             message: format!("已删除用户 {}", student_id),
         }))
     } else {
@@ -341,7 +375,7 @@ async fn tasks_handler(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
 ) -> Result<Json<Vec<TaskResponse>>, AppError> {
-    let _admin = ensure_admin(&headers, &state)?;
+    let _admin = ensure_admin(&headers, &state.store, &state.jwt_secret)?;
     let tasks = state.queue.snapshot().await.into_iter().map(|t| TaskResponse {
         run_at: t.run_at,
         student_id: t.student_id,
@@ -354,17 +388,17 @@ async fn tasks_handler(
 async fn poll_handler(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
-) -> Result<Json<MessageResponse>, AppError> {
-    let _admin = ensure_admin(&headers, &state)?;
+) -> Result<Json<ApiResult>, AppError> {
+    let _admin = ensure_admin(&headers, &state.store, &state.jwt_secret)?;
     poller::poll_once(&state).await;
-    Ok(Json(MessageResponse { message: "已手动触发轮询".to_string() }))
+    Ok(Json(ApiResult { message: "已手动触发轮询".to_string() }))
 }
 
 async fn get_webhook_handler(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
 ) -> Result<Json<WebhookConfig>, AppError> {
-    let _admin = ensure_admin(&headers, &state)?;
+    let _admin = ensure_admin(&headers, &state.store, &state.jwt_secret)?;
     Ok(Json(state.store.webhook()))
 }
 
@@ -372,18 +406,76 @@ async fn set_webhook_handler(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
     Json(config): Json<WebhookConfig>,
-) -> Result<Json<MessageResponse>, AppError> {
-    let _admin = ensure_admin(&headers, &state)?;
+) -> Result<Json<ApiResult>, AppError> {
+    let _admin = ensure_admin(&headers, &state.store, &state.jwt_secret)?;
     state.store.set_webhook(config)?;
     info!("webhook config updated via API");
-    Ok(Json(MessageResponse { message: "Webhook 配置已更新".to_string() }))
+    Ok(Json(ApiResult {
+        message: "Webhook 配置已更新".to_string(),
+    }))
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct UpdateSettingsRequest {
+    port: Option<u16>,
+    admin_id: Option<String>,
+}
+
+async fn get_settings_handler(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<UpdateSettingsRequest>, AppError> {
+    ensure_admin(&headers, &state.store, &state.jwt_secret)?;
+    let config = state.store.config();
+    Ok(Json(UpdateSettingsRequest {
+        port: Some(config.port),
+        admin_id: Some(config.admin_id),
+    }))
+}
+
+async fn update_settings_handler(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<UpdateSettingsRequest>,
+) -> Result<Json<ApiResult>, AppError> {
+    ensure_admin(&headers, &state.store, &state.jwt_secret)?;
+
+    if let Some(p) = req.port {
+        state.store.set_port(p)?;
+    }
+    if let Some(admin) = req.admin_id {
+        state.store.set_admin_id(admin)?;
+    }
+    state.store.save()?;
+
+    Ok(Json(ApiResult {
+        message: "系统设置已更新，部分设置可能需要重启生效".to_string(),
+    }))
+}
+
+async fn shutdown_handler(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<ApiResult>, AppError> {
+    ensure_admin(&headers, &state.store, &state.jwt_secret)?;
+
+    tracing::warn!("system shutdown requested by admin");
+    
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        std::process::exit(0);
+    });
+
+    Ok(Json(ApiResult {
+        message: "系统正在关闭...".to_string(),
+    }))
 }
 
 async fn test_webhook_handler(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
-) -> Result<Json<MessageResponse>, AppError> {
-    let _admin = ensure_admin(&headers, &state)?;
+) -> Result<Json<ApiResult>, AppError> {
+    ensure_admin(&headers, &state.store, &state.jwt_secret)?;
     let config = state.store.webhook();
     if !config.enabled {
         return Err(AppError::bad_request("Webhook 通知未启用"));
@@ -397,5 +489,7 @@ async fn test_webhook_handler(
         is_retry: false,
     };
     crate::webhook::notify(&state.webhook_http, &config, &event).await;
-    Ok(Json(MessageResponse { message: "测试通知已触发".to_string() }))
+    Ok(Json(ApiResult {
+        message: "测试通知已触发".to_string(),
+    }))
 }

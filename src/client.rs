@@ -107,9 +107,9 @@ impl CourseSchedule {
 pub struct Course {
     #[serde(rename = "course_id")]
     pub id: String,
-    #[serde(rename = "course_name")]
+    #[serde(rename = "course_name", alias = "name")]
     pub name: String,
-    #[serde(rename = "teacher_name")]
+    #[serde(rename = "teacher_name", alias = "teacher")]
     pub teacher: String,
 }
 
@@ -309,15 +309,28 @@ impl ClassClient {
 
     /// Sign-in for `schedule_id` on behalf of `student_id`.
     pub async fn checkin(&self, student_id: &str, schedule_id: &str) -> AppResult<Value> {
+        let ts = self.get_server_timestamp().await?;
         let url = "http://iclass.buaa.edu.cn:8081/app/course/stu_scan_sign.action";
-        let ts = (std::time::SystemTime::now()
+        let params = [("courseSchedId", schedule_id), ("timestamp", ts.as_str())];
+        self.iclass_post(student_id, url, &params).await
+    }
+
+    /// Fetch server-side timestamp for accurate sign-in (duaa style)
+    async fn get_server_timestamp(&self) -> AppResult<String> {
+        let url = "http://iclass.buaa.edu.cn:8081/app/common/get_timestamp.action";
+        let res = self.http.get(url).send().await?.text().await?;
+        // Parse "timestamp":1711534123545
+        if let Some(pos) = res.find("\"timestamp\":") {
+            let start = pos + "\"timestamp\":".len();
+            let end = res[start..].find('}').unwrap_or(res.len() - start);
+            return Ok(res[start..start + end].trim().to_string());
+        }
+        // Fallback to local if server fails
+        Ok(std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis()
-            + 36000)
-            .to_string();
-        let params = [("courseSchedId", schedule_id), ("timestamp", ts.as_str())];
-        self.iclass_post(student_id, url, &params).await
+            .to_string())
     }
 
     /// Query all courses of a term.

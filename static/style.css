@@ -259,6 +259,27 @@ input::placeholder {
   width: 100%;
 }
 
+.btn-toggle {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.btn-toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.btn-toggle-active {
+  background: var(--accent-green-dim);
+  color: var(--accent-green);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.btn-toggle-active:hover {
+  background: rgba(52, 211, 153, 0.2);
+}
+
 /* ── Status badges ────────────────────────────────────────────────────────── */
 
 .badge {
@@ -513,6 +534,13 @@ input::placeholder {
   font-size: 2rem;
   margin-bottom: 0.5rem;
   opacity: 0.5;
+}
+
+.help-text {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+  line-height: 1.4;
 }
 
 /* ── Loading spinner ──────────────────────────────────────────────────────── */

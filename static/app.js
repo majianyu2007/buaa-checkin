@@ -148,6 +148,7 @@ async function showDashboard() {
       <button class="tab" data-tab="users" onclick="switchTab('users')">👥 用户管理</button>
       <button class="tab" data-tab="tasks" onclick="switchTab('tasks')">⏱ 自动任务</button>
       <button class="tab" data-tab="webhook" onclick="switchTab('webhook')">🔔 通知设置</button>
+      <button class="tab" data-tab="settings" onclick="switchTab('settings')">⚙️ 系统设置</button>
       ` : ''}
     </div>
     <div id="tab-content"></div>
@@ -179,6 +180,7 @@ function switchTab(tab) {
     case 'users': loadUsers(); break;
     case 'tasks': loadTasks(); break;
     case 'webhook': loadWebhook(); break;
+    case 'settings': loadSettings(); break;
   }
 }
 
@@ -241,8 +243,9 @@ async function loadSchedules(dateStr) {
                   ${s.signStatus !== '1' && s.status_raw !== '1'
                     ? `<button class="btn btn-primary btn-sm" onclick="doCheckin('${escAttr(s.id)}', '${date}')">签到</button>`
                     : ''}
-                  <button class="btn btn-sm" onclick="toggleAutoCheckin('${escAttr(s.course_id)}', ${isAuto}, 'schedules', '${date}')"
-                    style="margin-left:4px; padding:4px 8px; background: ${isAuto ? '#e8f8f5' : '#f8f9f9'}; color: ${isAuto ? '#27ae60' : '#7f8c8d'}; border: 1px solid ${isAuto ? '#a3e4d7' : '#d5d8dc'}; cursor:pointer; border-radius:4px; transition:0.2s">
+                  <button class="btn btn-sm ${isAuto ? 'btn-toggle-active' : 'btn-toggle'}" 
+                    onclick="toggleAutoCheckin('${escAttr(s.course_id)}', ${isAuto}, 'schedules', '${date}')"
+                    style="margin-left:4px">
                     ${isAuto ? '✅ 已开启' : '⭕️ 开启自动'}
                   </button>
                 </td>
@@ -269,7 +272,10 @@ async function loadAllCourses() {
 
     content.innerHTML = `
       <div class="card">
-        <div class="card-title"><span class="icon">📚</span> 全量课程列表 (本学期)</div>
+        <div class="card-title" style="justify-content:space-between">
+          <span><span class="icon">📚</span> 全量课程列表 (本学期)</span>
+          <button class="btn btn-primary btn-sm" onclick="enableAllCourses()">🚀 一键开启全部代签</button>
+        </div>
         <p style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:1rem">在此处开启自动签到后，系统将自动为该课程的所有未来小节打卡。</p>
         ${courses.length === 0 ? '<div class="empty"><div class="icon">📚</div><p>未找到选课记录</p></div>' : `
         <table class="schedule-table">
@@ -283,13 +289,15 @@ async function loadAllCourses() {
           <tbody>
             ${courses.map(c => {
               const isAuto = enabledCourses.includes(c.id);
+              const name = c.course_name || c.name;
+              const teacher = c.teacher_name || c.teacher;
               return `
               <tr>
-                <td>${escHtml(c.name)}</td>
-                <td>${escHtml(c.teacher)}</td>
+                <td>${escHtml(name)}</td>
+                <td>${escHtml(teacher)}</td>
                 <td>
-                  <button class="btn btn-sm" onclick="toggleAutoCheckin('${escAttr(c.id)}', ${isAuto}, 'all-courses')"
-                    style="padding:4px 12px; background: ${isAuto ? '#e8f8f5' : '#f8f9f9'}; color: ${isAuto ? '#27ae60' : '#7f8c8d'}; border: 1px solid ${isAuto ? '#a3e4d7' : '#d5d8dc'}; cursor:pointer; border-radius:4px; transition:0.2s">
+                  <button class="btn btn-sm ${isAuto ? 'btn-toggle-active' : 'btn-toggle'}" 
+                    onclick="toggleAutoCheckin('${escAttr(c.id)}', ${isAuto}, 'all-courses')">
                     ${isAuto ? '✅ 自动签到 (已开启)' : '⭕️ 开启自动代签'}
                   </button>
                 </td>
@@ -330,6 +338,83 @@ async function toggleAutoCheckin(courseId, isCurrentlyEnabled, source, date) {
     toast(err.message, 'error');
   }
 }
+
+async function enableAllCourses() {
+  if (!confirm('确定要开启本学期所有课程的自动签到吗？')) return;
+  try {
+    const data = await api('POST', '/api/me/courses/all');
+    toast(data.message);
+    setTimeout(() => loadAllCourses(), 300);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// ── Settings tab ─────────────────────────────────────────────────────────────
+
+async function loadSettings() {
+  const content = document.getElementById('tab-content');
+  content.innerHTML = '<div class="card"><div class="empty"><span class="spinner"></span> 正在获取配置...</div></div>';
+  
+  try {
+    const config = await api('GET', '/api/system/settings');
+    content.innerHTML = `
+      <div class="card">
+        <div class="card-title"><span class="icon">⚙️</span> 系统配置</div>
+        <div class="form-group">
+          <label>服务端口 (Port)</label>
+          <input type="number" id="setting-port" value="${config.port || ''}" placeholder="例如 3000">
+          <p class="help-text">修改端口后需要重启程序才能生效。</p>
+        </div>
+        <div class="form-group">
+          <label>管理员学号 (Admin ID)</label>
+          <input type="text" id="setting-admin" value="${escAttr(config.admin_id || '')}" placeholder="管理员学号">
+          <p class="help-text">修改此项将变更系统唯一的管理权限拥有者。</p>
+        </div>
+        <div style="margin-top:1.5rem">
+          <button class="btn btn-primary" onclick="updateSettings()">保存配置</button>
+        </div>
+      </div>
+
+      <div class="card" style="border-color:rgba(231, 76, 60, 0.3)">
+        <div class="card-title" style="color:var(--accent-red)"><span class="icon">⚠️</span> 电源管理</div>
+        <p style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:1rem">
+          如果是使用 Docker 或 Systemd 管理的服务，关闭系统后通常会自动重启。
+        </p>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-danger" onclick="shutdownSystem()">关闭系统</button>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    content.innerHTML = `<div class="card"><div class="empty">无法获取配置: ${escHtml(err.message)}</div></div>`;
+  }
+}
+
+async function updateSettings() {
+  const port = parseInt(document.getElementById('setting-port').value);
+  const admin_id = document.getElementById('setting-admin').value;
+  try {
+    const data = await api('POST', '/api/system/settings', { port, admin_id });
+    toast(data.message);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function shutdownSystem() {
+  if (!confirm('确定要关闭系统吗？\n警告：关闭后您需要手动在服务器上重新启动，除非配置了自动重启。')) return;
+  try {
+    const data = await api('POST', '/api/system/shutdown');
+    toast(data.message);
+    setTimeout(() => {
+      window.location.reload();
+    }, 2000);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
 // ── Users tab ────────────────────────────────────────────────────────────────
 
 async function loadUsers() {
