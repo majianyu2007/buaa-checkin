@@ -56,7 +56,7 @@ fn run_service_inner() -> windows_service::Result<()> {
     // Start the async runtime and block
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        crate::run_server(".\\data".to_string(), 3000).await;
+        crate::run_server(".\\data".to_string(), Some(3000)).await;
     });
 
     status_handle.set_service_status(ServiceStatus {
