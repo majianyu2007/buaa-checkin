@@ -58,16 +58,16 @@ docker run -d \
 
 ### Windows 系统服务
 
-在 Windows 环境下，直接用管理员权限打开 PowerShell 或 CMD，即可注册为系统服务随开机自启：
+在 Windows 环境下，直接用 **管理员权限** 打开 PowerShell 或 CMD，即可通过内置命令将其注册为系统服务，实现开机自启无感运行：
 
 ```bat
-# 安装为 Windows 服务
+# 安装为 Windows 服务 (服务名为 buaa-checkin)
 buaa-checkin.exe --install
 
 # 卸载 Windows 服务
 buaa-checkin.exe --uninstall
 ```
-*提示：安装服务后，可通过任务管理器的“服务”选项卡或运行 `services.msc` 管理 `buaa-checkin` 服务的启动/停止。*
+*提示：安装服务后，可通过任务管理器的“服务”选项卡或运行 `services.msc` 找到名为 `buaa-checkin` 的服务进行手动启动/停止操作。默认配置为“自动（延迟启动）”以确保网络环境就绪。*
 
 ## ⚙️ 环境变量
 

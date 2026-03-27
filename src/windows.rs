@@ -76,10 +76,8 @@ pub fn install_service(exe_path: &str) -> std::io::Result<()> {
     std::process::Command::new("sc")
         .arg("create")
         .arg(SERVICE_NAME)
-        .arg("binPath=")
-        .arg(exe_path)
-        .arg("start=")
-        .arg("auto")
+        .arg(format!("binPath= {}", exe_path))
+        .arg("start= auto")
         .output()?;
     std::process::Command::new("sc")
         .arg("description")
