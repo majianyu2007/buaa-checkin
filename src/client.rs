@@ -102,6 +102,17 @@ impl CourseSchedule {
     }
 }
 
+/// One entry from the all-courses endpoint.
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct Course {
+    #[serde(rename = "course_id")]
+    pub id: String,
+    #[serde(rename = "course_name")]
+    pub name: String,
+    #[serde(rename = "teacher_name")]
+    pub teacher: String,
+}
+
 // ── ClassClient ───────────────────────────────────────────────────────────────
 
 const SCHEDULE_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -307,5 +318,22 @@ impl ClassClient {
             .to_string();
         let params = [("courseSchedId", schedule_id), ("timestamp", ts.as_str())];
         self.iclass_post(student_id, url, &params).await
+    }
+
+    /// Query all courses of a term.
+    pub async fn query_all_courses(
+        &self,
+        student_id: &str,
+        term_id: &str,
+    ) -> AppResult<Vec<Course>> {
+        let url = "https://iclass.buaa.edu.cn:8347/app/choosecourse/get_myall_course.action";
+        let params = [("user_type", "1"), ("xq_code", term_id)];
+        let res: Vec<Course> = self.iclass_post(student_id, url, &params).await?;
+        // Filter out courses with empty teacher names (often junk data)
+        let filtered = res
+            .into_iter()
+            .filter(|c| !c.teacher.trim().is_empty())
+            .collect();
+        Ok(filtered)
     }
 }

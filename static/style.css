@@ -172,11 +172,17 @@ select {
   outline: none;
 }
 
+input[type="date"],
 input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--accent-blue);
   box-shadow: 0 0 0 3px rgba(77, 142, 255, 0.12);
+}
+
+::-webkit-calendar-picker-indicator {
+  filter: invert(0.8) sepia(50%) saturate(1000%) hue-rotate(180deg);
+  cursor: pointer;
 }
 
 input::placeholder {

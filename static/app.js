@@ -143,6 +143,7 @@ async function showDashboard() {
     </div>
     <div class="tabs">
       <button class="tab active" data-tab="schedules" onclick="switchTab('schedules')">📋 今日课表</button>
+      <button class="tab" data-tab="all-courses" onclick="switchTab('all-courses')">📚 我的课程</button>
       ${isAdmin ? `
       <button class="tab" data-tab="users" onclick="switchTab('users')">👥 用户管理</button>
       <button class="tab" data-tab="tasks" onclick="switchTab('tasks')">⏱ 自动任务</button>
@@ -174,6 +175,7 @@ function switchTab(tab) {
 
   switch (tab) {
     case 'schedules': loadSchedules(); break;
+    case 'all-courses': loadAllCourses(); break;
     case 'users': loadUsers(); break;
     case 'tasks': loadTasks(); break;
     case 'webhook': loadWebhook(); break;
@@ -182,29 +184,38 @@ function switchTab(tab) {
 
 // ── Schedules tab ────────────────────────────────────────────────────────────
 
-async function loadSchedules() {
+async function loadSchedules(dateStr) {
   const content = document.getElementById('tab-content');
+  const date = dateStr || new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const displayDate = date.slice(0, 4) + '-' + date.slice(4, 6) + '-' + date.slice(6, 8);
+
   try {
     const [schedules, enabledCourses] = await Promise.all([
-      api('GET', '/api/schedules'),
+      api('GET', `/api/schedules?date=${date}`),
       api('GET', '/api/me/courses').catch(() => [])
     ]);
 
-    if (schedules.length === 0) {
-      content.innerHTML = `
-        <div class="card">
-          <div class="card-title"><span class="icon">📋</span> 今日课表</div>
-          <div class="empty">
-            <div class="icon">📭</div>
-            <p>今天没有课程安排</p>
-          </div>
+    let html = `
+      <div class="card">
+        <div class="card-title" style="justify-content:space-between">
+          <span><span class="icon">📋</span> 课表查询</span>
+          <input type="date" value="${displayDate}" onchange="loadSchedules(this.value.replace(/-/g, ''))" 
+            style="padding:4px 8px; border:1px solid #ddd; border-radius:4px; font-size:14px; background:var(--bg-secondary); color:var(--text-primary)">
         </div>
-      `;
+    `;
+
+    if (schedules.length === 0) {
+      html += `
+        <div class="empty">
+          <div class="icon">📭</div>
+          <p>${displayDate} 没有课程安排</p>
+        </div>
+      </div>`;
+      content.innerHTML = html;
       return;
     }
-    content.innerHTML = `
-      <div class="card">
-        <div class="card-title"><span class="icon">📋</span> 今日课表</div>
+
+    html += `
         <table class="schedule-table">
           <thead>
             <tr>
@@ -228,11 +239,11 @@ async function loadSchedules() {
                     : '<span class="badge badge-unsigned">○ 未签到</span>'}</td>
                 <td>
                   ${s.signStatus !== '1' && s.status_raw !== '1'
-                    ? `<button class="btn btn-primary btn-sm" onclick="doCheckin('${escAttr(s.id)}')">签到</button>`
+                    ? `<button class="btn btn-primary btn-sm" onclick="doCheckin('${escAttr(s.id)}', '${date}')">签到</button>`
                     : ''}
-                  <button class="btn btn-sm" onclick="toggleAutoCheckin('${escAttr(s.course_id)}', ${isAuto})"
+                  <button class="btn btn-sm" onclick="toggleAutoCheckin('${escAttr(s.course_id)}', ${isAuto}, 'schedules', '${date}')"
                     style="margin-left:4px; padding:4px 8px; background: ${isAuto ? '#e8f8f5' : '#f8f9f9'}; color: ${isAuto ? '#27ae60' : '#7f8c8d'}; border: 1px solid ${isAuto ? '#a3e4d7' : '#d5d8dc'}; cursor:pointer; border-radius:4px; transition:0.2s">
-                    ${isAuto ? '✅ 自动签到 (已开启)' : '⭕️ 开启自动签到'}
+                    ${isAuto ? '✅ 已开启' : '⭕️ 开启自动'}
                   </button>
                 </td>
               </tr>
@@ -242,28 +253,79 @@ async function loadSchedules() {
         </table>
       </div>
     `;
+    content.innerHTML = html;
   } catch (err) {
     content.innerHTML = `<div class="card"><div class="empty">加载失败: ${escHtml(err.message)}</div></div>`;
   }
 }
 
-async function doCheckin(scheduleId) {
+async function loadAllCourses() {
+  const content = document.getElementById('tab-content');
+  try {
+    const [courses, enabledCourses] = await Promise.all([
+      api('GET', '/api/me/courses/all'),
+      api('GET', '/api/me/courses').catch(() => [])
+    ]);
+
+    content.innerHTML = `
+      <div class="card">
+        <div class="card-title"><span class="icon">📚</span> 全量课程列表 (本学期)</div>
+        <p style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:1rem">在此处开启自动签到后，系统将自动为该课程的所有未来小节打卡。</p>
+        ${courses.length === 0 ? '<div class="empty"><div class="icon">📚</div><p>未找到选课记录</p></div>' : `
+        <table class="schedule-table">
+          <thead>
+            <tr>
+              <th>课程名称</th>
+              <th>授课教师</th>
+              <th>自动签到</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${courses.map(c => {
+              const isAuto = enabledCourses.includes(c.id);
+              return `
+              <tr>
+                <td>${escHtml(c.name)}</td>
+                <td>${escHtml(c.teacher)}</td>
+                <td>
+                  <button class="btn btn-sm" onclick="toggleAutoCheckin('${escAttr(c.id)}', ${isAuto}, 'all-courses')"
+                    style="padding:4px 12px; background: ${isAuto ? '#e8f8f5' : '#f8f9f9'}; color: ${isAuto ? '#27ae60' : '#7f8c8d'}; border: 1px solid ${isAuto ? '#a3e4d7' : '#d5d8dc'}; cursor:pointer; border-radius:4px; transition:0.2s">
+                    ${isAuto ? '✅ 自动签到 (已开启)' : '⭕️ 开启自动代签'}
+                  </button>
+                </td>
+              </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+        `}
+      </div>
+    `;
+  } catch (err) {
+    content.innerHTML = `<div class="card"><div class="empty">加载失败: ${escHtml(err.message)}</div></div>`;
+  }
+}
+
+async function doCheckin(scheduleId, date) {
   try {
     const data = await api('POST', '/api/checkin', { schedule_id: scheduleId });
     toast(data.message);
-    setTimeout(() => loadSchedules(), 1500);
+    setTimeout(() => loadSchedules(date), 1500);
   } catch (err) {
     toast(err.message, 'error');
   }
 }
 
-async function toggleAutoCheckin(courseId, isCurrentlyEnabled) {
+async function toggleAutoCheckin(courseId, isCurrentlyEnabled, source, date) {
   try {
     const method = isCurrentlyEnabled ? 'DELETE' : 'POST';
     const data = await api(method, `/api/me/courses/${courseId}`);
     toast(data.message);
-    // Reload schedules to update badges
-    setTimeout(() => loadSchedules(), 300);
+    // Reload the originating view
+    setTimeout(() => {
+      if (source === 'all-courses') loadAllCourses();
+      else loadSchedules(date);
+    }, 300);
   } catch (err) {
     toast(err.message, 'error');
   }

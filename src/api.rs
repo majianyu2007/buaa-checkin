@@ -123,6 +123,7 @@ struct MessageResponse {
 pub fn routes() -> Router<Arc<AppState>> {
     let me_routes = Router::new()
         .route("/courses", get(my_courses_handler))
+        .route("/courses/all", get(all_courses_handler))
         .route("/courses/{course_id}", post(add_my_course_handler))
         .route("/courses/{course_id}", delete(remove_my_course_handler));
 
@@ -194,6 +195,29 @@ async fn my_courses_handler(
     let student_id = extract_student_id(&headers, &state.jwt_secret)?;
     let course_ids = state.store.get_student(&student_id).map(|s| s.course_ids).unwrap_or_default();
     Ok(Json(course_ids))
+}
+
+async fn all_courses_handler(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<Vec<crate::client::Course>>, AppError> {
+    let student_id = extract_student_id(&headers, &state.jwt_secret)?;
+    let term = current_term_id();
+    let courses = state.client.query_all_courses(&student_id, &term).await?;
+    Ok(Json(courses))
+}
+
+fn current_term_id() -> String {
+    use chrono::{Datelike, Local};
+    let now = Local::now();
+    let year = now.year();
+    let month = now.month();
+
+    if month >= 8 {
+        format!("{}{}{}", year, year + 1, 1)
+    } else {
+        format!("{}{}{}", year - 1, year, 2)
+    }
 }
 
 async fn add_my_course_handler(
